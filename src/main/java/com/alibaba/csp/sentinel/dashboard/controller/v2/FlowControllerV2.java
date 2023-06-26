@@ -21,6 +21,7 @@ import com.alibaba.csp.sentinel.dashboard.repository.rule.InMemoryRuleRepository
 import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.FlowRuleZookeeperProvider;
 import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.FlowRuleZookeeperPublisher;
 import com.alibaba.csp.sentinel.util.StringUtil;
+import com.alibaba.fastjson.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -208,5 +209,6 @@ public class FlowControllerV2 {
     private void publishRules(/*@NonNull*/ String app) throws Exception {
         List<FlowRuleEntity> rules = repository.findAllByApp(app);
         rulePublisher.publish(app, rules);
+        logger.info("zk推送流控规则成功|{}", JSON.toJSONString(rules));
     }
 }

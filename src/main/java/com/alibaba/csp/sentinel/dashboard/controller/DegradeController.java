@@ -1,17 +1,14 @@
 /*
  * Copyright 1999-2018 Alibaba Group Holding Ltd.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
  */
 package com.alibaba.csp.sentinel.dashboard.controller;
 
@@ -24,6 +21,10 @@ import com.alibaba.csp.sentinel.dashboard.discovery.AppManagement;
 import com.alibaba.csp.sentinel.dashboard.discovery.MachineInfo;
 import com.alibaba.csp.sentinel.dashboard.auth.AuthService.PrivilegeType;
 import com.alibaba.csp.sentinel.dashboard.repository.rule.RuleRepository;
+import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.DegradeRuleZookeeperProvider;
+import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.DegradeRuleZookeeperPublisher;
+import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.FlowRuleZookeeperProvider;
+import com.alibaba.csp.sentinel.dashboard.rule.zookeeper.FlowRuleZookeeperPublisher;
 import com.alibaba.csp.sentinel.slots.block.RuleConstant;
 import com.alibaba.csp.sentinel.slots.block.degrade.circuitbreaker.CircuitBreakerStrategy;
 import com.alibaba.csp.sentinel.util.StringUtil;
@@ -31,9 +32,11 @@ import com.alibaba.csp.sentinel.util.StringUtil;
 import com.alibaba.csp.sentinel.dashboard.datasource.entity.rule.DegradeRuleEntity;
 import com.alibaba.csp.sentinel.dashboard.domain.Result;
 
+import com.alibaba.fastjson.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -62,6 +65,13 @@ public class DegradeController {
     @Autowired
     private AppManagement appManagement;
 
+    @Autowired
+    @Qualifier("degradeRuleZookeeperProvider")
+    private DegradeRuleZookeeperProvider ruleProvider;
+    @Autowired
+    @Qualifier("degradeRuleZookeeperPublisher")
+    private DegradeRuleZookeeperPublisher rulePublisher;
+
     @GetMapping("/rules.json")
     @AuthAction(PrivilegeType.READ_RULE)
     public Result<List<DegradeRuleEntity>> apiQueryMachineRules(String app, String ip, Integer port) {
@@ -78,7 +88,8 @@ public class DegradeController {
             return Result.ofFail(-1, "given ip does not belong to given app");
         }
         try {
-            List<DegradeRuleEntity> rules = sentinelApiClient.fetchDegradeRuleOfMachine(app, ip, port);
+            List<DegradeRuleEntity> rules = ruleProvider.getRules(app);
+            // List<DegradeRuleEntity> rules = sentinelApiClient.fetchDegradeRuleOfMachine(app, ip, port);
             rules = repository.saveAll(rules);
             return Result.ofSuccess(rules);
         } catch (Throwable throwable) {
@@ -111,8 +122,7 @@ public class DegradeController {
 
     @PutMapping("/rule/{id}")
     @AuthAction(PrivilegeType.WRITE_RULE)
-    public Result<DegradeRuleEntity> apiUpdateRule(@PathVariable("id") Long id,
-                                                     @RequestBody DegradeRuleEntity entity) {
+    public Result<DegradeRuleEntity> apiUpdateRule(@PathVariable("id") Long id, @RequestBody DegradeRuleEntity entity) {
         if (id == null || id <= 0) {
             return Result.ofFail(-1, "id can't be null or negative");
         }
@@ -169,7 +179,15 @@ public class DegradeController {
 
     private boolean publishRules(String app, String ip, Integer port) {
         List<DegradeRuleEntity> rules = repository.findAllByMachine(MachineInfo.of(app, ip, port));
-        return sentinelApiClient.setDegradeRuleOfMachine(app, ip, port, rules);
+        try {
+            rulePublisher.publish(app, rules);
+        } catch (Exception e) {
+            logger.error("创建熔断规则，发送zk异常", e);
+            return false;
+        }
+        logger.info("zk推送熔断规则成功|{}", JSON.toJSONString(rules));
+        return true;
+        // return sentinelApiClient.setDegradeRuleOfMachine(app, ip, port, rules);
     }
 
     private <R> Result<R> checkEntityInternal(DegradeRuleEntity entity) {
@@ -203,11 +221,10 @@ public class DegradeController {
         if (strategy == null) {
             return Result.ofFail(-1, "circuit breaker strategy cannot be null");
         }
-        if (strategy < CircuitBreakerStrategy.SLOW_REQUEST_RATIO.getType()
-            || strategy > RuleConstant.DEGRADE_GRADE_EXCEPTION_COUNT) {
+        if (strategy < CircuitBreakerStrategy.SLOW_REQUEST_RATIO.getType() || strategy > RuleConstant.DEGRADE_GRADE_EXCEPTION_COUNT) {
             return Result.ofFail(-1, "Invalid circuit breaker strategy: " + strategy);
         }
-        if (entity.getMinRequestAmount()  == null || entity.getMinRequestAmount() <= 0) {
+        if (entity.getMinRequestAmount() == null || entity.getMinRequestAmount() <= 0) {
             return Result.ofFail(-1, "Invalid minRequestAmount");
         }
         if (entity.getStatIntervalMs() == null || entity.getStatIntervalMs() <= 0) {
