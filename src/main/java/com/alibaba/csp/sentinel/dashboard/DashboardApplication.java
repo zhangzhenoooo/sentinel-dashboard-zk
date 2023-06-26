@@ -15,10 +15,13 @@
  */
 package com.alibaba.csp.sentinel.dashboard;
 
+import com.alibaba.csp.sentinel.config.SentinelConfig;
 import com.alibaba.csp.sentinel.init.InitExecutor;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.servlet.ServletComponentScan;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * Sentinel dashboard application.
@@ -26,10 +29,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @author Carpenter Lee
  */
 @SpringBootApplication
+@Configuration
+@ServletComponentScan
 public class DashboardApplication {
 
     public static void main(String[] args) {
         triggerSentinelInit();
+        // System.setProperty(SentinelConfig.APP_TYPE_PROP_KEY,"1");
         SpringApplication.run(DashboardApplication.class, args);
     }
 
